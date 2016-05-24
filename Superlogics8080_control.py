@@ -18,10 +18,10 @@ class Superlogics8080_control:
         self.s = None
         self.connect()
         conf = self.getConfiguration()
-        if conf == '!01510600':
+        if conf is not None:
             print 'Configuration ok'
         else:
-            print ''.join(('Configuration problem: ', conf))
+            print ''.join(('Configuration problem: ', str(conf)))
         
     def close(self):
         if self.s != None:
@@ -77,7 +77,7 @@ class Superlogics8080_control:
         conf = self.sendReceive(cmd)
         retVal = None
         try:
-            if conf[0] == '1':
+            if conf[0] == '!':
                 adr = conf[1:3]
                 mode = conf[3:5]
                 mode_dict = {'50': 'counter',
@@ -193,4 +193,4 @@ class Superlogics8080_control:
 
 
 if __name__ == '__main__':
-    sc = Superlogics8080_control('com13')
+    sc = Superlogics8080_control('/dev/ttyUSB1')

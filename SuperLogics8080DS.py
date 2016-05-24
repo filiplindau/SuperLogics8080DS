@@ -19,12 +19,12 @@ class Command:
         self.command = command
         self.data = data
 
-#==================================================================
+# ==================================================================
 #   Superlogics8080DS Class Description:
 #
 #         Control of a Superlogics8080 frequency counter
 #
-#==================================================================
+# ==================================================================
 #     Device States Description:
 #
 #   DevState.ON :       Connected to Halcyon driver
@@ -33,32 +33,32 @@ class Command:
 #   DevState.UNKNOWN :  Communication problem
 #   DevState.MOVING :  Motor moving
 #   DevState.INIT :     Initializing Halcyon driver.
-#==================================================================
+# ==================================================================
 
 
 class Superlogics8080DS(PyTango.Device_4Impl):
 
-#--------- Add your global variables here --------------------------
+    #--------- Add your global variables here --------------------------
 
-#------------------------------------------------------------------
-#     Device constructor
-#------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    #     Device constructor
+    # ------------------------------------------------------------------
     def __init__(self, cl, name):
         PyTango.Device_4Impl.__init__(self, cl, name)
         Superlogics8080DS.init_device(self)
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     Device destructor
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def delete_device(self):
         with self.streamLock:
             self.info_stream(''.join(("[Device delete_device method] for device", self.get_name())))
         self.stopThread()
 
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     Device initialization
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def init_device(self):
         self.streamLock = threading.Lock()
         with self.streamLock:
@@ -85,7 +85,7 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         self.stateHandlerDict = {PyTango.DevState.ON: self.onHandler,
                                  PyTango.DevState.MOVING: self.onHandler,
                                  PyTango.DevState.ALARM: self.onHandler,
-                                 PyTango.DevState.FAULT: self.onHandler,
+                                 PyTango.DevState.FAULT: self.faultHandler,
                                  PyTango.DevState.INIT: self.initHandler,
                                  PyTango.DevState.UNKNOWN: self.unknownHandler,
                                  PyTango.DevState.OFF: self.offHandler}
@@ -102,7 +102,7 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         The thread is stopped by setting the stopStateThreadFlag.
         """
         prevState = self.get_state()
-        while self.stopStateThreadFlag == False:
+        while self.stopStateThreadFlag is False:
             try:
                 self.stateHandlerDict[self.get_state()](prevState)
                 prevState = self.get_state()
@@ -117,7 +117,6 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         self.stateThread.join(3)
         self.frequencyDevice.close()
 
-
     def unknownHandler(self, prevState):
         """Handles the UNKNOWN state, before communication with the hardware devices
         has been established. Here all devices are initialized.
@@ -129,7 +128,7 @@ class Superlogics8080DS(PyTango.Device_4Impl):
 
         # Need to connect to frequency counter
 
-        while self.stopStateThreadFlag == False:
+        while self.stopStateThreadFlag is False:
             # Frequency counter:
             try:
                 with self.streamLock:
@@ -141,11 +140,11 @@ class Superlogics8080DS(PyTango.Device_4Impl):
                 with self.streamLock:
                     self.info_stream(''.join(('Opening frequency device on port ', self.port)))
                 self.frequencyDevice = sc.Superlogics8080_control(self.port)
-            except Exception, e:
+            except Exception, ex:
                 with self.streamLock:
                     self.error_stream(''.join(('Could not connect to frequency counter ', self.port)))
                 with self.streamLock:
-                    self.error_stream(str(e))
+                    self.error_stream(str(ex))
                 self.set_status('Could not connect to frequency counter')
                 self.checkCommands(blockTime=connectionTimeout)
                 continue
@@ -162,7 +161,7 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         retries = 0
         maxTries = 5
 
-        while self.stopStateThreadFlag == False:
+        while self.stopStateThreadFlag is False:
             retries += 1
             if retries > maxTries:
                 self.set_state(PyTango.DevState.UNKNOWN)
@@ -177,10 +176,10 @@ class Superlogics8080DS(PyTango.Device_4Impl):
                     self.frequencyDevice.setConfiguration(01, 'frequency')
                     self.configuration = self.frequencyDevice.getConfiguration(01)
 
-            except Exception, e:
+            except Exception, ex:
                 with self.streamLock:
                     self.error_stream(''.join(('Error when initializing device')))
-                    self.error_stream(str(e))
+                    self.error_stream(str(ex))
                 self.checkCommands(blockTime=waitTime)
                 continue
 
@@ -194,29 +193,32 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         with self.streamLock:
             self.info_stream('Entering onHandler')
         handledStates = [PyTango.DevState.ON, PyTango.DevState.ALARM, PyTango.DevState.MOVING]
-        waitTime = 0.1
+        waitTime = 0.2
         self.set_status('On')
-        while self.stopStateThreadFlag == False:
+        while self.stopStateThreadFlag is False:
             self.info_stream('onhandler loop')
-            with self.attrLock:
-                state = self.get_state()
+            state = self.get_state()
+            self.info_stream(''.join(('State: ', str(state))))
             if state not in handledStates:
                 break
 
             # Read frequency from frequency counter
-            with self.attrLock:
-                try:
-                    self.info_stream('frequency check')
+
+            try:
+                self.info_stream('frequency check')
+                with self.attrLock:
                     self.frequency = self.frequencyDevice.getFrequency(1)
-                    self.info_stream('frequency ok')
-                except Exception, e:
-                    with self.streamLock:
-                        self.error_stream(''.join(('Error reading frequency counter: ', str(e))))
-                    self.set_state(PyTango.DevState.FAULT)
+                self.info_stream('frequency ok')
+            except Exception, ex:
+                with self.streamLock:
+                    self.error_stream(''.join(('Error reading frequency counter: ', str(ex))))
+                self.set_status(''.join(('Error reading frequency counter: ', str(ex))))
+                self.set_state(PyTango.DevState.FAULT)
+                with self.attrLock:
                     self.frequency = None
 
             self.checkCommands(blockTime=waitTime)
-
+        time.sleep(1.0)
 
     def faultHandler(self, prevState):
         """Handles the FAULT state. A problem has been detected.
@@ -224,11 +226,11 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         with self.streamLock:
             self.info_stream('Entering faultHandler')
         handledStates = [PyTango.DevState.FAULT]
-        waitTime = 0.1
+        waitTime = 0.5
         retries = 0
         maxTries = 5
 
-        while self.stopStateThreadFlag == False:
+        while self.stopStateThreadFlag is False:
             if self.get_state() not in handledStates:
                 break
             # Test frequency counter:
@@ -238,16 +240,18 @@ class Superlogics8080DS(PyTango.Device_4Impl):
                 if status == 'host down':
                     self.frequencyDevice.resetStatus(01)
                 self.configuration = self.frequencyDevice.getConfiguration(01)
+                self.debug_stream(''.join(('Configuration: ', str(self.configuration))))
                 if self.configuration[1] != 'frequency':
                     self.frequencyDevice.setConfiguration(01, 'frequency')
                     self.configuration = self.frequencyDevice.getConfiguration(01)
                 else:
+                    self.debug_stream('Going back to on state')
                     self.set_state(PyTango.DevState.ON)
 
                 with self.streamLock:
                     self.info_stream(''.join(('Frequency counter configuration: ', str(self.configuration))))
 
-            except Exception, e:
+            except Exception:
                 self.set_state(PyTango.DevState.UNKNOWN)
 
             if self.get_state() == PyTango.DevState.FAULT:
@@ -255,6 +259,7 @@ class Superlogics8080DS(PyTango.Device_4Impl):
                 if retries > maxTries:
                     self.set_state(PyTango.DevState.UNKNOWN)
             self.checkCommands(blockTime=waitTime)
+        self.checkCommands(blockTime=waitTime)
 
     def offHandler(self, prevState):
         """Handles the OFF state. Does nothing, just goes back to ON.
@@ -263,13 +268,12 @@ class Superlogics8080DS(PyTango.Device_4Impl):
             self.info_stream('Entering offHandler')
         self.set_state(PyTango.DevState.ON)
 
-
     def checkCommands(self, blockTime=0):
         """Checks the commandQueue for new commands. Must be called regularly.
         If the queue is empty the method exits immediately.
         """
-#         with self.streamLock:
-#             self.debug_stream('Entering checkCommands')
+        with self.streamLock:
+            self.debug_stream('Entering checkCommands')
         try:
             if blockTime == 0:
                 cmd = self.commandQueue.get(block=False)
@@ -292,28 +296,27 @@ class Superlogics8080DS(PyTango.Device_4Impl):
                 if self.get_state() not in [PyTango.DevState.UNKNOWN]:
                     self.set_state(PyTango.DevState.ON)
 
-
         except Queue.Empty:
-#             with self.streamLock:
-#                 self.debug_stream('checkCommands: queue empty')
+            # with self.streamLock:
+            # self.debug_stream('checkCommands: queue empty')
             pass
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     Always excuted hook method
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def always_executed_hook(self):
         pass
 
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     Frequency attribute
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def read_Frequency(self, attr):
         with self.streamLock:
             self.info_stream(''.join(('Reading frequency')))
         with self.attrLock:
             attr_read = self.frequency
-            if attr_read == None:
+            if attr_read is None:
                 attr.set_quality(PyTango.AttrQuality.ATTR_INVALID)
                 attr_read = 0.0
             attr.set_value(attr_read)
@@ -331,25 +334,25 @@ class Superlogics8080DS(PyTango.Device_4Impl):
 
 
 
-#==================================================================
+# ==================================================================
 #
 #     Superlogics8080DS command methods
 #
-#==================================================================
+# ==================================================================
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     On command:
 #
 #     Description: Start Halcyon driver
 #
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def On(self):
         with self.streamLock:
             self.info_stream(''.join(("In ", self.get_name(), "::On")))
         cmdMsg = Command('on')
         self.commandQueue.put(cmdMsg)
 
-#---- On command State Machine -----------------
+# ---- On command State Machine -----------------
     def is_On_allowed(self):
         if self.get_state() in [PyTango.DevState.UNKNOWN]:
             #     End of Generated Code
@@ -358,63 +361,59 @@ class Superlogics8080DS(PyTango.Device_4Impl):
         return True
 
 
-
-#==================================================================
+# ==================================================================
 #
 #     Superlogics8080DSClass class definition
 #
-#==================================================================
+# ==================================================================
 class Superlogics8080DSClass(PyTango.DeviceClass):
 
     #     Class Properties
     class_property_list = {
         }
 
-
     #     Device Properties
     device_property_list = {
         'port':
             [PyTango.DevString,
-            "Com port of the 8080 frequency counter",
-            [  ] ],
+             "Com port of the 8080 frequency counter",
+             []],
 
         }
-
 
     #     Command definitions
     cmd_list = {
         'On':
             [[PyTango.DevVoid, ""],
-            [PyTango.DevVoid, ""]],
+             [PyTango.DevVoid, ""]],
         }
-
 
     #     Attribute definitions
     attr_list = {
         'Frequency':
             [[PyTango.DevLong,
-            PyTango.SCALAR,
-            PyTango.READ],
-            {
-                'description':"Detected frequency",
-                'unit':'Hz',
-            } ],
+             PyTango.SCALAR,
+             PyTango.READ],
+             {
+                'description': "Detected frequency",
+                'unit': 'Hz',
+             }],
         }
 
 
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
 #     Superlogics8080DSClass Constructor
-#------------------------------------------------------------------
+# ------------------------------------------------------------------
     def __init__(self, name):
         PyTango.DeviceClass.__init__(self, name)
-        self.set_type(name);
+        self.set_type(name)
         print "In Superlogics8080DSClass  constructor"
 
-#==================================================================
+# ==================================================================
 #
 #     Superlogics8080DS class main method
 #
-#==================================================================
+# ==================================================================
 if __name__ == '__main__':
     try:
         py = PyTango.Util(sys.argv)
